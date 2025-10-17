@@ -54,6 +54,13 @@ SHIFT_MAP = {
 }
 EMAIL_REGEX = r"[^@]+@[^@]+\.[^@]+"
 ASSIGNED_SHIFTS = [5, 6, 7]  # Only assign these shifts
+SHIFT_NAMES = {
+    4: "setup",
+    5: "shift1",
+    6: "shift2",
+    7: "shift3",
+    8: "cleanup"
+}
 
 
 @dataclass
@@ -73,12 +80,54 @@ class Volunteer:
     email: str
     phone: str = ""
     shifts: set[int] = field(default_factory=set)
+    assigned_booth: str = ""
 
     def add_shift(self, shift: int):
         self.shifts.add(shift)
 
     def remove_shift(self, shift: int):
         self.shifts.discard(shift)
+
+    def __repr__(self):
+        return f"{self.first_name} {self.last_name} ({self.email})"
+
+
+@dataclass
+class Booth:
+    name: str
+    capacity_per_shift: int = 2
+    assignments: dict[int, list[str]] = field(
+        default_factory=lambda: defaultdict(list)
+    )  # shift -> list of volunteer emails
+
+    def assign_volunteer(self, shift: int, volunteer_email: str) -> bool:
+        if len(self.assignments[shift]) < self.capacity_per_shift:
+            self.assignments[shift].append(volunteer_email)
+            return True
+        return False
+
+    def has_space(self, shift: int) -> bool:
+        return len(self.assignments[shift]) < self.capacity_per_shift
+
+    def __str__(self):
+        output = [f"{self.name}:"]
+        for shift in sorted(self.assignments.keys()):
+            vols = ", ".join(self.assignments[shift]) or "No volunteers"
+            shift_name = SHIFT_NAMES.get(shift, f"Shift {shift}")
+            output.append(f"  {shift_name}: {vols}")
+        return "\n".join(output)
+
+
+def load_booths(file_path: str) -> list[Booth]:
+    booths = []
+    with open(file_path, mode='r', newline='', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            booth_name = row.get('BoothName', '').strip()
+            if booth_name:
+                booths.append(Booth(name=booth_name))
+    logger.info(f"Loaded {len(booths)} booths from {file_path}")
+    return booths
 
 
 def parse_signup_data(file_path):
@@ -93,7 +142,7 @@ def parse_signup_data(file_path):
         dict[str, Volunteer]: Dictionary mapping email to Volunteer object.
     """
     volunteers: dict[str, Volunteer] = {}
-    with open(file_path, mode='r', newline='', encoding='utf-8') as file:
+    with open(file_path, mode='r', newline='', encoding='utf-8-sig') as file:
         reader = csv.DictReader(file)
         for row in reader:
             try:
@@ -131,36 +180,52 @@ def parse_signup_data(file_path):
     return volunteers
 
 
-def load_booths(file_path):
-    booths = []
-    with open(file_path, mode='r', newline='', encoding='utf-8') as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if row:  # Skip empty rows
-                booths.append(row[0].strip())
-    return booths
-
-
-def assign_booths(volunteers, booths):
-    assignments = defaultdict(lambda: defaultdict(list))
-    # Track assigned booth per volunteer
+def apply_break_rule(volunteers: dict[str, Volunteer]):
+    """
+    Volunteers working 4 or more shifts get their last shift removed.
+    """
     for vol in volunteers.values():
-        vol.assigned_booth = None
+        if len(vol.shifts) >= 4:
+            last_shift = max(vol.shifts)
+            vol.remove_shift(last_shift)
+            logger.info(f"{vol} assigned break — removed "
+                        f"{SHIFT_NAMES.get(last_shift, last_shift)}")
+
+
+def assign_booths(volunteers: dict[str, Volunteer], booths: list[Booth]):
+    booth_index = 0
+    booth_count = len(booths)
+
+    # Sort volunteers for deterministic assignment
+    sorted_volunteers = sorted(
+        volunteers.values(),
+        key=lambda v: (v.last_name.lower(), v.first_name.lower())
+    )
 
     for shift in ASSIGNED_SHIFTS:
-        available = [v for v in volunteers.values() if shift in v.shifts]
-        available.sort(key=lambda v: v.assigned_booth or "")
-        booth_idx = 0
-        for vol in available:
-            while True:
-                booth = booths[booth_idx % len(booths)]
-                if len(assignments[booth][shift]) < 2:
-                    assignments[booth][shift].append(vol.email)
-                    if vol.assigned_booth is None:
-                        vol.assigned_booth = booth
+        for vol in sorted_volunteers:
+            if shift not in vol.shifts:
+                continue  # Volunteer not signed up for this shift
+
+            # Try to assign to the same booth as before
+            if vol.assigned_booth:
+                booth = next((
+                    b
+                    for b in booths
+                    if b.name == vol.assigned_booth
+                ), None)
+                if booth and booth.assign_volunteer(shift, vol.email):
+                    continue
+
+            # Otherwise, find the next available booth
+            attempts = 0
+            while attempts < booth_count:
+                booth = booths[booth_index % booth_count]
+                booth_index += 1
+                attempts += 1
+                if booth.assign_volunteer(shift, vol.email):
+                    vol.assigned_booth = booth.name
                     break
-                booth_idx += 1
-    return assignments
 
 
 def main():
@@ -180,26 +245,35 @@ def main():
     volunteer_files = sys.argv[2:]
 
     booths = load_booths(booths_file)
-    logger.info(f"Loaded booths ({len(booths)}): {booths}")
+    logger.info(f"Loaded booths ({len(booths)}): {[b.name for b in booths]}")
 
     volunteers: dict[str, Volunteer] = {}
-    for file_path in volunteer_files:
-        file_vols = parse_signup_data(file_path)
+    for vf in volunteer_files:
+        file_vols = parse_signup_data(vf)
         for email, vol in file_vols.items():
             if email in volunteers:
                 volunteers[email].shifts.update(vol.shifts)
             else:
                 volunteers[email] = vol
 
-    assignments = assign_booths(volunteers, booths)
+    # Apply break rule before assignment
+    apply_break_rule(volunteers)
 
-    print("\n--- Booth Assignments ---")
-    for booth in booths:
-        print(f"\n{booth}:")
-        for shift in ASSIGNED_SHIFTS:
-            vols = assignments[booth][shift]
-            print(f"  Shift {shift}: "
-                  f"{', '.join(vols) if vols else 'No volunteers'}")
+    assign_booths(volunteers, booths)
+
+    print("\n=== FINAL BOOTH ROSTER ===")
+    for booth in sorted(booths, key=lambda b: b.name):
+        print(booth)
+        print()
+
+    print(f"Total volunteers: {len(volunteers)}")
+
+    print("=== UNFILLED BOOTHS ===")
+    for shift in ASSIGNED_SHIFTS:
+        unfilled = [b.name for b in booths if b.has_space(shift)]
+        if unfilled:
+            print(f"{SHIFT_NAMES[shift]}: {len(unfilled)} booths need"
+                  f" volunteers")
 
 
 if __name__ == "__main__":
