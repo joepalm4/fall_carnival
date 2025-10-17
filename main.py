@@ -109,6 +109,22 @@ class Booth:
     def has_space(self, shift: int) -> bool:
         return len(self.assignments[shift]) < self.capacity_per_shift
 
+    def formatted(self, volunteers: dict[str, "Volunteer"]) -> str:
+        """
+        Return a human-readable string showing volunteer *names* instead of
+        emails.
+        """
+        output = [f"{self.name}:"]
+        for shift in sorted(self.assignments.keys()):
+            vols = ", ".join(
+                f"{volunteers[email].first_name} {volunteers[email].last_name}"
+                for email in self.assignments[shift]
+                if email in volunteers
+            ) or "No volunteers"
+            shift_name = SHIFT_NAMES.get(shift, f"Shift {shift}")
+            output.append(f"  {shift_name}: {vols}")
+        return "\n".join(output)
+
     def __str__(self):
         output = [f"{self.name}:"]
         for shift in sorted(self.assignments.keys()):
@@ -263,7 +279,7 @@ def main():
 
     print("\n=== FINAL BOOTH ROSTER ===")
     for booth in sorted(booths, key=lambda b: b.name):
-        print(booth)
+        print(booth.formatted(volunteers))
         print()
 
     print(f"Total volunteers: {len(volunteers)}")
