@@ -244,6 +244,37 @@ def assign_booths(volunteers: dict[str, Volunteer], booths: list[Booth]):
                     break
 
 
+def write_roster_csv(
+        booths: list[Booth],
+        volunteers: dict[str, Volunteer],
+        filename="roster.csv"
+):
+    """
+    Writes the booth roster to a CSV file.
+    Columns: BoothName, Shift, Volunteer1, Volunteer2
+    """
+    with open(filename, mode='w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(["BoothName", "Shift", "Volunteer1", "Volunteer2"])
+        for booth in booths:
+            for shift in sorted(booth.assignments.keys()):
+                vols = booth.assignments[shift]
+                names = []
+                for email in vols:
+                    vol_obj = volunteers.get(email)
+                    if vol_obj:
+                        names.append(f"{vol_obj.first_name} "
+                                     f"{vol_obj.last_name}")
+                    else:
+                        names.append(email)
+                while len(names) < 2:
+                    names.append("")
+                writer.writerow(
+                    [booth.name, SHIFT_NAMES.get(shift, shift)] + names
+                )
+    logger.info(f"Roster written to {filename}")
+
+
 def main():
     """
     Main entry point for the script.
@@ -290,6 +321,10 @@ def main():
         if unfilled:
             print(f"{SHIFT_NAMES[shift]}: {len(unfilled)} booths need"
                   f" volunteers")
+
+    # Write final roster to CSV
+    write_roster_csv(booths, volunteers, filename="data\\roster.csv")
+    print("Roster written to roster.csv")
 
 
 if __name__ == "__main__":
