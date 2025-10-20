@@ -84,13 +84,17 @@ class Volunteer:
     email: str
     phone: str = ""
     shifts: set[int] = field(default_factory=set)
-    assigned_booth: str = ""
+
+    # shift -> booth name
+    booths_per_shift: dict[int, str] = field(default_factory=dict)
 
     def add_shift(self, shift: int):
         self.shifts.add(shift)
 
     def remove_shift(self, shift: int):
         self.shifts.discard(shift)
+        if shift in self.booths_per_shift:
+            del self.booths_per_shift[shift]
 
     def __repr__(self):
         return f"Volunteer({self.first_name} {self.last_name}, {self.email})"
@@ -256,14 +260,16 @@ def assign_booths(volunteers: dict[str, Volunteer], booths: list[Booth]):
             if shift not in vol.shifts:
                 continue  # Volunteer not signed up for this shift
 
-            # Try to assign to the same booth as before
-            if vol.assigned_booth:
+            # Try to assign to the same booth as previous shift if possible
+            prev_booth_name = vol.booths_per_shift.get(shift - 1)
+            if prev_booth_name:
                 booth = next((
                     b
                     for b in booths
-                    if b.name == vol.assigned_booth
+                    if b.name == prev_booth_name
                 ), None)
                 if booth and booth.assign_volunteer(shift, vol.email):
+                    vol.booths_per_shift[shift] = booth.name
                     continue
 
             # Otherwise, find the next available booth
@@ -273,7 +279,7 @@ def assign_booths(volunteers: dict[str, Volunteer], booths: list[Booth]):
                 booth_index += 1
                 attempts += 1
                 if booth.assign_volunteer(shift, vol.email):
-                    vol.assigned_booth = booth.name
+                    vol.booths_per_shift[shift] = booth.name
                     break
 
 
@@ -309,6 +315,46 @@ def write_roster_csv(
                     [booth.name, SHIFT_NAMES.get(shift, shift)] + names
                 )
     logger.info(f"Roster written to {filename}")
+
+
+def write_volunteer_roster_csv(
+        volunteers: dict[str, Volunteer],
+        filename="volunteer_roster.csv"
+):
+    """
+    Writes a CSV where each row is a volunteer with their assigned shifts and
+    booths.
+    """
+    with open(filename, mode='w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+
+        # Determine max number of shifts across all volunteers
+        max_shifts = max((len(v.shifts) for v in volunteers.values()), default=0)
+
+        # Write header
+        header = ["FirstName", "LastName", "Email", "Phone"]
+        for i in range(1, max_shifts + 1):
+            header += [f"Shift{i}", f"Booth{i}"]
+        writer.writerow(header)
+
+        # Write volunteer rows
+        for vol in sorted(volunteers.values(), key=lambda v: (v.last_name.lower(), v.first_name.lower())):
+            row = [vol.first_name, vol.last_name, vol.email, vol.phone]
+
+            # Sort shifts chronologically
+            sorted_shifts = sorted(vol.shifts)
+            for shift in sorted_shifts:
+                shift_name = SHIFT_NAMES.get(shift, f"Shift {shift}")
+                booth_name = vol.booths_per_shift.get(shift, "Unassigned")
+                row += [shift_name, booth_name]
+
+            # Fill remaining shift columns with blanks if fewer than max
+            for _ in range(max_shifts - len(sorted_shifts)):
+                row += ["", ""]
+
+            writer.writerow(row)
+
+    logger.info(f"Volunteer-oriented roster written to {filename}")
 
 
 # ---------------------------------------------------------------------
@@ -372,9 +418,12 @@ def main():
     )
     logger.info(f"Total filled slots: {total_slots}")
 
-    # Write final roster to CSV
+    # Write per-booth CSV
     write_roster_csv(booths, volunteers, filename="roster.csv")
     print("Roster written to roster.csv")
+
+    # Write per-volunteer CSV
+    write_volunteer_roster_csv(volunteers, filename="volunteer_roster.csv")
 
 
 if __name__ == "__main__":
