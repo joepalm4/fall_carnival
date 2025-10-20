@@ -25,8 +25,8 @@ possible, volunteers should be assigned to the same booth for all their shifts.
 
 There are 26 booths, and each booth needs 2 volunteers per shift.
 
-If a volunteer works for four or five shifts, their last shift should be
-unassigned so they can have a break.
+If a volunteer works for four or five shifts, the last chronological shift
+they signed up for should be unassigned so they can have a break.
 """
 import csv
 import logging
@@ -63,6 +63,9 @@ SHIFT_NAMES = {
 }
 
 
+# ---------------------------------------------------------------------
+# Data Classes
+# ---------------------------------------------------------------------
 @dataclass
 class Volunteer:
     """
@@ -74,6 +77,7 @@ class Volunteer:
         email (str): Volunteer email (used as unique identifier).
         phone (str): Volunteer phone number (optional).
         shifts (set[int]): Set of integer shifts assigned to this volunteer.
+        assigned_booth (str): Name of the booth assigned to this volunteer.
     """
     first_name: str
     last_name: str
@@ -89,7 +93,7 @@ class Volunteer:
         self.shifts.discard(shift)
 
     def __repr__(self):
-        return f"{self.first_name} {self.last_name} ({self.email})"
+        return f"Volunteer({self.first_name} {self.last_name}, {self.email})"
 
 
 @dataclass
@@ -134,19 +138,40 @@ class Booth:
         return "\n".join(output)
 
 
+# ---------------------------------------------------------------------
+# Parsing & Loading
+# ---------------------------------------------------------------------
 def load_booths(file_path: str) -> list[Booth]:
+    """
+    Load booth data from a CSV file.
+
+    Args:
+        file_path (str): Path to the CSV file.
+
+    Returns:
+        list[Booth]: List of Booth objects.
+    """
     booths = []
-    with open(file_path, mode='r', newline='', encoding='utf-8-sig') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            booth_name = row.get('BoothName', '').strip()
-            if booth_name:
-                booths.append(Booth(name=booth_name))
+    try:
+        with open(file_path, mode='r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                booth_name = row.get('BoothName', '').strip()
+                if booth_name:
+                    booths.append(Booth(name=booth_name))
+    except FileNotFoundError:
+        logger.error(f"Booth file not found: {file_path}")
+        sys.exit(1)
+
+    if not booths:
+        logger.error(f"No booths found in file: {file_path}")
+        sys.exit(1)
+
     logger.info(f"Loaded {len(booths)} booths from {file_path}")
     return booths
 
 
-def parse_signup_data(file_path):
+def parse_signup_data(file_path: str) -> dict[str, Volunteer]:
     """
     Parse a CSV file of volunteer signups into a dictionary of Volunteer
     objects.
@@ -155,16 +180,16 @@ def parse_signup_data(file_path):
         file_path (str): Path to the CSV file.
 
     Returns:
-        dict[str, Volunteer]: Dictionary mapping email to Volunteer object.
+        volunteers (dict): Dictionary mapping email to Volunteer objects.
     """
     volunteers: dict[str, Volunteer] = {}
-    with open(file_path, mode='r', newline='', encoding='utf-8-sig') as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            try:
-                first_name = row['Volunteer First Name']
-                last_name = row['Volunteer Last Name']
-                email = row['Email']
+    try:
+        with open(file_path, mode='r', newline='', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                first_name = row.get('Volunteer First Name', '')
+                last_name = row.get('Volunteer Last Name', '')
+                email = row.get('Email', '').strip().lower()
                 phone = row.get('Phone', '')
 
                 # Skip row if email is missing
@@ -172,12 +197,16 @@ def parse_signup_data(file_path):
                     logger.warning(f"Skipping row: invalid email '{email}'")
                     continue
 
-                # Map 'What' column to shift number
-                shift_name = row['What'].strip().lower()
+                # Map 'What' column to shift number (start time)                
+                shift_name = row.get('What', '').strip().lower()
+                if not shift_name:
+                    logger.warning(f"Skipping row: missing shift name in "
+                                   f"{file_path}")
+                    continue
                 shift = SHIFT_MAP.get(shift_name)
                 if shift is None:
                     logger.warning(f"Skipping row: unknown shift "
-                                   f"'{row['What']}'")
+                                    f"'{row['What']}'")
                     continue
 
                 # Lookup or create volunteer
@@ -185,17 +214,20 @@ def parse_signup_data(file_path):
                     volunteers[email] = Volunteer(
                         first_name, last_name, email, phone
                     )
-                    logger.info(f"Added new volunteer: {first_name} "
+                    logger.debug(f"Added new volunteer: {first_name} "
                                 f"{last_name} ({email})")
                 volunteers[email].add_shift(shift)
-            except KeyError as e:
-                logger.warning(f"Skipping row: missing column {e}")
-                continue  # Skip rows with missing fields
+    except FileNotFoundError:
+        logger.error(f"Signup file not found: {file_path}")
+        sys.exit(1)
 
     logger.info(f"Total volunteers parsed: {len(volunteers)}")
     return volunteers
 
 
+# ---------------------------------------------------------------------
+# Assignment Logic
+# ---------------------------------------------------------------------
 def apply_break_rule(volunteers: dict[str, Volunteer]):
     """
     Volunteers working 4 or more shifts get their last shift removed.
@@ -204,7 +236,7 @@ def apply_break_rule(volunteers: dict[str, Volunteer]):
         if len(vol.shifts) >= 4:
             last_shift = max(vol.shifts)
             vol.remove_shift(last_shift)
-            logger.info(f"{vol} assigned break — removed "
+            logger.info(f"{vol} should take break during "
                         f"{SHIFT_NAMES.get(last_shift, last_shift)}")
 
 
@@ -212,7 +244,8 @@ def assign_booths(volunteers: dict[str, Volunteer], booths: list[Booth]):
     booth_index = 0
     booth_count = len(booths)
 
-    # Sort volunteers for deterministic assignment
+    # Sort volunteers for deterministic assignment (order by last name, first
+    # name)
     sorted_volunteers = sorted(
         volunteers.values(),
         key=lambda v: (v.last_name.lower(), v.first_name.lower())
@@ -244,10 +277,13 @@ def assign_booths(volunteers: dict[str, Volunteer], booths: list[Booth]):
                     break
 
 
+# ---------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------
 def write_roster_csv(
-        booths: list[Booth],
-        volunteers: dict[str, Volunteer],
-        filename="roster.csv"
+    booths: list[Booth],
+    volunteers: dict[str, Volunteer],
+    filename="roster.csv"
 ):
     """
     Writes the booth roster to a CSV file.
@@ -275,6 +311,9 @@ def write_roster_csv(
     logger.info(f"Roster written to {filename}")
 
 
+# ---------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------
 def main():
     """
     Main entry point for the script.
@@ -291,21 +330,26 @@ def main():
     booths_file = sys.argv[1]
     volunteer_files = sys.argv[2:]
 
+    # Load booths
     booths = load_booths(booths_file)
-    logger.info(f"Loaded booths ({len(booths)}): {[b.name for b in booths]}")
 
+    # Load and merge volunteers from all files
     volunteers: dict[str, Volunteer] = {}
     for vf in volunteer_files:
         file_vols = parse_signup_data(vf)
         for email, vol in file_vols.items():
             if email in volunteers:
+                # Merge shifts for existing volunteer
+                logger.info(f"Merging shifts for existing volunteer: {vol}")
                 volunteers[email].shifts.update(vol.shifts)
             else:
+                # New volunteer
                 volunteers[email] = vol
 
     # Apply break rule before assignment
     apply_break_rule(volunteers)
 
+    # Assign volunteers to booths
     assign_booths(volunteers, booths)
 
     print("\n=== FINAL BOOTH ROSTER ===")
@@ -322,8 +366,14 @@ def main():
             print(f"{SHIFT_NAMES[shift]}: {len(unfilled)} booths need"
                   f" volunteers")
 
+    # Summary statistics
+    total_slots = sum(
+        len(b.assignments[s]) for b in booths for s in ASSIGNED_SHIFTS
+    )
+    logger.info(f"Total filled slots: {total_slots}")
+
     # Write final roster to CSV
-    write_roster_csv(booths, volunteers, filename="data\\roster.csv")
+    write_roster_csv(booths, volunteers, filename="roster.csv")
     print("Roster written to roster.csv")
 
 
