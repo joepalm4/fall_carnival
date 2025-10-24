@@ -1,6 +1,8 @@
 # Event Signup Roster Generator
 
-This Python project generates a volunteer roster for an event with multiple booths and shifts. It reads volunteer signup data from CSV files and assigns volunteers to booths based on their availability while ensuring fair shift distribution.
+A Python tool to generate volunteer and booth schedules for a fall carnival. 
+It reads volunteer signup data from CSV files, assigns volunteers to booths
+based on availability, and ensures fair shift distribution.
 
 ---
 
@@ -12,9 +14,55 @@ This Python project generates a volunteer roster for an event with multiple boot
 - Validates emails and known shift names.
 - Optional phone number support.
 - Prints final roster to console for diagnostics.
-- Assigns volunteers to booths (26 booths total) with 2 volunteers per shift.
+- Assigns volunteers to booths with 2 volunteers per shift.
 - Volunteers working 4+ shifts get a break on their last shift.
 - Detects unfilled booths per shift.
+
+---
+
+## Installation
+
+1. Clone this repository:
+
+```bash
+git clone https://github.com/yourusername/event-roster-generator.git
+```
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## Usage
+
+```bash
+python main.py <booths_csv> <volunteer_csv1> [<volunteer_csv2> ...]
+```
+
+Example:
+```bash
+python main.py booths.csv volunteers1.csv volunteers2.csv
+```
+
+This will generate:
+
+- `roster.csv` — Booth-focused roster
+- `volunteer_roster.csv` — Volunteer-focused roster
+- `volunteer_roster_2x2_landscape_fixed.pdf` — PDF of volunteer schedules
+- `booth_roster_2x2_landscape.pdf` — PDF of booth schedules
+
+---
+
+## Assignment Rules
+
+- Each booth needs **2 volunteers per shift**.
+- Only **shift1, shift2, and shift3** are assigned to booths.
+- Volunteers working **4 or 5 shifts** are given a break on their last shift.
+- Volunteers are **assigned to the same booth across shifts** if possible.
+- Unassigned shifts are labeled `"Unassigned"` in volunteer PDFs/CSVs.
+- **Setup and cleanup** shifts are always listed but not assigned to booths.
 
 ---
 
@@ -32,16 +80,8 @@ Only **shift1, shift2, and shift3** are assigned to booths.
 
 ---
 
-## CSV Input Formats
+## Contributing
+Contributions are welcome! Please fork the repository and submit a pull request.
 
-### Booths CSV
-
-- Must include a header row with a `BoothName` column.
-- Example:
-
-```csv
-BoothName
-Booth1
-Booth2
-Bake Sale
-Pumpkin Patch
+## License
+MIT License
