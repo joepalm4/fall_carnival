@@ -201,7 +201,7 @@ def parse_signup_data(file_path: str) -> dict[str, Volunteer]:
                     logger.warning(f"Skipping row: invalid email '{email}'")
                     continue
 
-                # Map 'What' column to shift number (start time)                
+                # Map 'What' column to shift number (start time)
                 shift_name = row.get('What', '').strip().lower()
                 if not shift_name:
                     logger.warning(f"Skipping row: missing shift name in "
@@ -210,7 +210,7 @@ def parse_signup_data(file_path: str) -> dict[str, Volunteer]:
                 shift = SHIFT_MAP.get(shift_name)
                 if shift is None:
                     logger.warning(f"Skipping row: unknown shift "
-                                    f"'{row['What']}'")
+                                   f"'{row['What']}'")
                     continue
 
                 # Lookup or create volunteer
@@ -219,7 +219,7 @@ def parse_signup_data(file_path: str) -> dict[str, Volunteer]:
                         first_name, last_name, email, phone
                     )
                     logger.debug(f"Added new volunteer: {first_name} "
-                                f"{last_name} ({email})")
+                                 f"{last_name} ({email})")
                 volunteers[email].add_shift(shift)
     except FileNotFoundError:
         logger.error(f"Signup file not found: {file_path}")
@@ -329,7 +329,9 @@ def write_volunteer_roster_csv(
         writer = csv.writer(f)
 
         # Determine max number of shifts across all volunteers
-        max_shifts = max((len(v.shifts) for v in volunteers.values()), default=0)
+        max_shifts = max(
+            (len(v.shifts) for v in volunteers.values()), default=0
+        )
 
         # Write header
         header = ["FirstName", "LastName", "Email", "Phone"]
