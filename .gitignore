@@ -1,5 +1,6 @@
 __pycache__
 *.log
-data
+*.pdf
 *roster.csv
+data
 venv

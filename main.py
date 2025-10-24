@@ -34,6 +34,10 @@ import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import inch
+from reportlab.lib import colors
 
 # Configure logging
 logging.basicConfig(
@@ -359,6 +363,139 @@ def write_volunteer_roster_csv(
     logger.info(f"Volunteer-oriented roster written to {filename}")
 
 
+def generate_volunteer_pdf_2x2_landscape_fixed(volunteers: dict[str, Volunteer], filename="volunteer_roster_2x2_landscape_fixed.pdf"):
+    """
+    Generate a PDF with volunteer schedules in a fixed 2x2 grid per landscape 8.5x11 page.
+    Boxes are all the same size; extra shifts beyond box space are truncated.
+    """
+    sorted_vols = sorted(volunteers.values(), key=lambda v: (v.last_name.lower(), v.first_name.lower()))
+    c = canvas.Canvas(filename, pagesize=landscape(letter))
+    width, height = landscape(letter)
+    margin = 0.5 * inch
+
+    cols = 2
+    rows = 2
+    box_width = (width - 2 * margin) / cols
+    box_height = (height - 2 * margin) / rows
+    line_height = 14       # font size
+    shift_indent = 20
+    top_padding = 25       # space from top of box to first line
+
+    page_num = 1
+    for i in range(0, len(sorted_vols), cols*rows):
+        c.setFont("Helvetica-Bold", 16)
+        c.drawCentredString(width / 2, height - margin / 2, f"Volunteer Schedule - Page {page_num}")
+
+        for idx, vol in enumerate(sorted_vols[i:i + cols*rows]):
+            col_idx = idx % cols
+            row_idx = idx // cols
+
+            x_left = margin + col_idx * box_width
+            y_top = height - margin - row_idx * box_height
+
+            # Draw fixed-size box
+            c.setStrokeColor(colors.black)
+            c.rect(x_left, y_top - box_height, box_width, box_height, stroke=1, fill=0)
+
+            # Start writing inside box
+            y = y_top - top_padding
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(x_left + 10, y, f"{vol.first_name} {vol.last_name} ({vol.email})")
+            y -= line_height
+            c.setFont("Helvetica", 12)
+            if vol.phone:
+                c.drawString(x_left + 10, y, f"Phone: {vol.phone}")
+                y -= line_height
+
+            # Max number of shift lines to fit in box
+            max_shift_lines = int((box_height - top_padding - 2*line_height) // line_height)
+            shifts_to_show = sorted(vol.shifts)[:max_shift_lines]
+
+            if shifts_to_show:
+                for shift in shifts_to_show:
+                    shift_name = SHIFT_NAMES.get(shift, f"Shift {shift}")
+                    booth_name = vol.booths_per_shift.get(shift, "Unassigned")
+                    c.drawString(x_left + shift_indent, y, f"{shift_name}: {booth_name}")
+                    y -= line_height
+            else:
+                c.drawString(x_left + shift_indent, y, "No assigned shifts")
+                y -= line_height
+
+        c.showPage()
+        page_num += 1
+
+    c.save()
+    logger.info(f"Landscape 2x2 fixed-box PDF volunteer roster generated: {filename}")
+
+
+def generate_booth_pdf_2x2_landscape(booths: list[Booth], volunteers: dict[str, Volunteer], filename="booth_roster_2x2_landscape.pdf"):
+    """
+    Generate a PDF with booth schedules in a fixed 2x2 grid per landscape 8.5x11 page.
+    Each box shows a booth and its assigned volunteers per shift.
+    Notes underfilled shifts.
+    """
+    sorted_booths = sorted(booths, key=lambda b: b.name.lower())
+    c = canvas.Canvas(filename, pagesize=landscape(letter))
+    width, height = landscape(letter)
+    margin = 0.5 * inch
+
+    cols = 2
+    rows = 2
+    box_width = (width - 2 * margin) / cols
+    box_height = (height - 2 * margin) / rows
+    line_height = 14
+    top_padding = 25
+    indent = 10
+
+    page_num = 1
+    for i in range(0, len(sorted_booths), cols*rows):
+        c.setFont("Helvetica-Bold", 16)
+        c.drawCentredString(width / 2, height - margin / 2, f"Booth Schedule - Page {page_num}")
+
+        for idx, booth in enumerate(sorted_booths[i:i + cols*rows]):
+            col_idx = idx % cols
+            row_idx = idx // cols
+
+            x_left = margin + col_idx * box_width
+            y_top = height - margin - row_idx * box_height
+
+            # Draw fixed-size box
+            c.setStrokeColor(colors.black)
+            c.rect(x_left, y_top - box_height, box_width, box_height, stroke=1, fill=0)
+
+            # Start writing inside box
+            y = y_top - top_padding
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(x_left + indent, y, booth.name)
+            y -= line_height
+
+            c.setFont("Helvetica", 12)
+            for shift in sorted(booth.assignments.keys()):
+                shift_name = SHIFT_NAMES.get(shift, f"Shift {shift}")
+                vols = [
+                    f"{volunteers[email].first_name} {volunteers[email].last_name}"
+                    for email in booth.assignments[shift] if email in volunteers
+                ]
+
+                if not vols:
+                    vols = ["No volunteers yet"]
+                line_text = f"{shift_name}: {', '.join(vols)}"
+
+                # Check for underfilled shifts
+                missing_count = booth.capacity_per_shift - len(booth.assignments[shift])
+                if 0 < missing_count <= booth.capacity_per_shift:
+                    line_text += f" (Needs {missing_count} more volunteer{'s' if missing_count > 1 else ''})"
+
+                c.drawString(x_left + indent * 2, y, line_text)
+                y -= line_height
+
+        c.showPage()
+        page_num += 1
+
+    c.save()
+    logger.info(f"Landscape 2x2 PDF booth roster generated: {filename}")
+
+
 # ---------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------
@@ -371,8 +508,8 @@ def main():
     - Prints the final roster sorted by last name, then first name.
     """
     if len(sys.argv) < 3:
-        logger.error("Usage: python main.py <booths_csv> <volunteer_csv1> "
-                     "[<volunteer_csv2> ...]")
+        print("Usage: python main.py <booths_csv> <volunteer_csv1> "
+              "[<volunteer_csv2> ...]")
         sys.exit(1)
 
     booths_file = sys.argv[1]
@@ -426,6 +563,12 @@ def main():
 
     # Write per-volunteer CSV
     write_volunteer_roster_csv(volunteers, filename="volunteer_roster.csv")
+
+    generate_volunteer_pdf_2x2_landscape_fixed(volunteers)
+    print("Refined 2x2 grid PDF volunteer roster written to volunteer_roster_2x2_landscape_fixed.pdf")
+
+    generate_booth_pdf_2x2_landscape(booths, volunteers)
+    print("Booth PDF with underfilled shift notes written to booth_roster_2x2_landscape.pdf")
 
 
 if __name__ == "__main__":
