@@ -57,15 +57,15 @@ SHIFT_MAP = {
     "clean up": 8
 }
 EMAIL_REGEX = r"[^@]+@[^@]+\.[^@]+"
+ALL_SHIFTS = [4, 5, 6, 7, 8]  # setup → cleanup
 ASSIGNED_SHIFTS = [5, 6, 7]  # Only assign these shifts
 SHIFT_NAMES = {
     4: "setup",
-    5: "shift1",
-    6: "shift2",
-    7: "shift3",
+    5: "5-6pm",
+    6: "6-7pm",
+    7: "7-8pm",
     8: "cleanup"
 }
-
 
 # ---------------------------------------------------------------------
 # Data Classes
@@ -407,25 +407,22 @@ def generate_volunteer_pdf_2x2_landscape_fixed(volunteers: dict[str, Volunteer],
                 c.drawString(x_left + 10, y, f"Phone: {vol.phone}")
                 y -= line_height
 
-            # Max number of shift lines to fit in box
-            max_shift_lines = int((box_height - top_padding - 2*line_height) // line_height)
-            shifts_to_show = sorted(vol.shifts)[:max_shift_lines]
-
-            if shifts_to_show:
-                for shift in shifts_to_show:
-                    shift_name = SHIFT_NAMES.get(shift, f"Shift {shift}")
+            # List all volunteer shifts
+            if not vol.shifts:
+                c.drawString(x_left + shift_indent, y, "No shifts assigned")
+                y -= line_height
+            else:
+                for shift in sorted(vol.shifts):
+                    shift_name = SHIFT_NAMES.get(shift, shift)
                     booth_name = vol.booths_per_shift.get(shift, "Unassigned")
                     c.drawString(x_left + shift_indent, y, f"{shift_name}: {booth_name}")
                     y -= line_height
-            else:
-                c.drawString(x_left + shift_indent, y, "No assigned shifts")
-                y -= line_height
 
         c.showPage()
         page_num += 1
 
     c.save()
-    logger.info(f"Landscape 2x2 fixed-box PDF volunteer roster generated: {filename}")
+    logger.info(f"Volunteer 2x2 landscape PDF generated (showing all personal shifts): {filename}")
 
 
 def generate_booth_pdf_2x2_landscape(booths: list[Booth], volunteers: dict[str, Volunteer], filename="booth_roster_2x2_landscape.pdf"):
@@ -531,19 +528,24 @@ def main():
                 # New volunteer
                 volunteers[email] = vol
 
-    # Apply break rule before assignment
+    # Apply break rule before assignment—Volunteers working 4 or more shifts
+    # get their last shift removed.
     apply_break_rule(volunteers)
 
     # Assign volunteers to booths
     assign_booths(volunteers, booths)
 
+    # Print the total number of volunteers
+    print(f"Total volunteers: {len(volunteers)}")
+
+    """Print the final booth roster
     print("\n=== FINAL BOOTH ROSTER ===")
     for booth in sorted(booths, key=lambda b: b.name):
         print(booth.formatted(volunteers))
         print()
+    """
 
-    print(f"Total volunteers: {len(volunteers)}")
-
+    # Print any unfilled booth shifts
     print("=== UNFILLED BOOTHS ===")
     for shift in ASSIGNED_SHIFTS:
         unfilled = [b.name for b in booths if b.has_space(shift)]
@@ -558,15 +560,18 @@ def main():
     logger.info(f"Total filled slots: {total_slots}")
 
     # Write per-booth CSV
-    write_roster_csv(booths, volunteers, filename="roster.csv")
-    print("Roster written to roster.csv")
+    write_roster_csv(booths, volunteers, filename="booth_roster.csv")
+    print("Roster written to booth_roster.csv")
 
     # Write per-volunteer CSV
     write_volunteer_roster_csv(volunteers, filename="volunteer_roster.csv")
+    print("Roster written to volunteer_roster.csv")
 
+    # Create Volunteer PDF
     generate_volunteer_pdf_2x2_landscape_fixed(volunteers)
     print("Refined 2x2 grid PDF volunteer roster written to volunteer_roster_2x2_landscape_fixed.pdf")
 
+    # Create Booth PDF
     generate_booth_pdf_2x2_landscape(booths, volunteers)
     print("Booth PDF with underfilled shift notes written to booth_roster_2x2_landscape.pdf")
 
