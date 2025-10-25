@@ -33,6 +33,7 @@ import logging
 import re
 import sys
 from collections import defaultdict
+from datetime import datetime
 from dataclasses import dataclass, field
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.pdfgen import canvas
@@ -66,6 +67,7 @@ SHIFT_NAMES = {
     7: "7-8pm",
     8: "cleanup"
 }
+
 
 # ---------------------------------------------------------------------
 # Data Classes
@@ -363,7 +365,10 @@ def write_volunteer_roster_csv(
     logger.info(f"Volunteer-oriented roster written to {filename}")
 
 
-def generate_volunteer_pdf_2x2_landscape_fixed(volunteers: dict[str, Volunteer], filename="volunteer_roster_2x2_landscape_fixed.pdf"):
+def generate_volunteer_pdf_2x2_landscape_fixed(
+        volunteers: dict[str, Volunteer],
+        filename="volunteer_roster.pdf"
+):
     """
     Generate a PDF with volunteer schedules in a fixed 2x2 grid per landscape 8.5x11 page.
     Boxes are all the same size; extra shifts beyond box space are truncated.
@@ -425,7 +430,11 @@ def generate_volunteer_pdf_2x2_landscape_fixed(volunteers: dict[str, Volunteer],
     logger.info(f"Volunteer 2x2 landscape PDF generated (showing all personal shifts): {filename}")
 
 
-def generate_booth_pdf_2x2_landscape(booths: list[Booth], volunteers: dict[str, Volunteer], filename="booth_roster_2x2_landscape.pdf"):
+def generate_booth_pdf_2x2_landscape(
+        booths: list[Booth],
+        volunteers: dict[str, Volunteer],
+        filename="booth_roster.pdf"
+):
     """
     Generate a PDF with booth schedules in a fixed 2x2 grid per landscape 8.5x11 page.
     Each box shows a booth and its assigned volunteers per shift.
@@ -559,6 +568,9 @@ def main():
     )
     logger.info(f"Total filled slots: {total_slots}")
 
+    # Create filename timestamp append
+    timestamp = datetime.now().strftime("_%y%m%d_%H%M")
+
     # Write per-booth CSV
     write_roster_csv(booths, volunteers, filename="booth_roster.csv")
     print("Roster written to booth_roster.csv")
@@ -568,12 +580,20 @@ def main():
     print("Roster written to volunteer_roster.csv")
 
     # Create Volunteer PDF
-    generate_volunteer_pdf_2x2_landscape_fixed(volunteers)
-    print("Refined 2x2 grid PDF volunteer roster written to volunteer_roster_2x2_landscape_fixed.pdf")
+    generate_volunteer_pdf_2x2_landscape_fixed(
+        volunteers=volunteers,
+        filename=f"volunteer_roster{timestamp}.pdf"
+    )
+    print("Refined 2x2 grid PDF volunteer roster "
+          "written to volunteer_roster.pdf")
 
     # Create Booth PDF
-    generate_booth_pdf_2x2_landscape(booths, volunteers)
-    print("Booth PDF with underfilled shift notes written to booth_roster_2x2_landscape.pdf")
+    generate_booth_pdf_2x2_landscape(
+        booths=booths,
+        volunteers=volunteers,
+        filename=f"booth_roster{timestamp}.pdf"
+    )
+    print("Booth PDF with underfilled shift notes written to booth_roster.pdf")
 
 
 if __name__ == "__main__":
